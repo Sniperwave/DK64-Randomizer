@@ -10,6 +10,7 @@
 .definelabel resetCoconutHUD, 0x806C4E8C
 .definelabel displayItemOnHUD, 0x806F8BC4
 .definelabel getRefillCount, 0x806F8EDC
+.definelabel getItemCount, 0x806F8AD4
 .definelabel setMovesForAllKongs, 0x80025D8C
 .definelabel setMoveProgressive, 0x80025D14
 .definelabel setMoveBitfield, 0x80025D44
@@ -18,3 +19,5 @@
 .definelabel BananaMedalGet, 0x80687C48
 .definelabel CrownGet, 0x80687CC8
 .definelabel getTotalGBs, 0x806FB418
+.definelabel updateGBCountHUD, 0x806F8278
+.definelabel initHUDItem, 0x806F8004

@@ -22,58 +22,139 @@ function highlightInstancesOfText(find_text, in_text) {
 }
 
 function goTo(url, new_tab=false) {
+    if (url.indexOf("./") !== 0) {
+        window.location.href = url;
+        return;
+    }
+    const html_index = url.indexOf(".html");
+    if (html_index === -1) {
+        window.location.href = url;
+        return;
+    }
+    if (html_index === (url.length - 5)) {
+        window.location.href = `./index.html?title=${url.substring(2, url.length - 5)}`
+        return;
+    }
     window.location.href = url;
-}
-
-function handleSuggestionClick(url) {
-    document.getElementById("search_suggestions").innerHTML = "";
-    document.getElementById("article-search").value = "";
-    goTo(url);
 }
 
 function getLink(item) {
     if (Object.keys(item).includes("github")) {
-        return `./${item.github}.html`
+        return `./index.html?title=${item.github}`
     }
-    return `./${item.link}.html`
+    return `./index.html?title=${item.link}`
 }
 
-document.getElementById("article-search").addEventListener("keyup", (e) => {
-    const input_value = e.target.value;
-    if (articles.length == 0) {
-        return; // No articles
-    }
-    let matches = [];
-    if (input_value.length >= 1) {
-        articles.forEach(article => {
-            const score = getSearchScore(input_value, article.name);
-            if (score > 0) {
-                matches.push({
-                    "score": score,
-                    "text": highlightInstancesOfText(input_value, article.name),
-                    "link": getLink(article),
-                })
+let article_names = [];
+let articles_ready = false;
+async function getSuggestions() {
+    return new Promise((resolve) => {
+        const checkReady = () => {
+            if (articles_ready) {
+                resolve(article_names.slice());
+            } else {
+                setTimeout(checkReady, 100);
             }
-        })
-        matches = matches.sort((a, b) => a.score < b.score ? 1 : ((b.score < a.score) ? -1 : 0));
-    }
-    matches = matches.filter((item, index) => index < 5); // Clamp to 5 search results at most
-    const sugg_hook = document.getElementById("search_suggestions");
-    sugg_hook.innerHTML = matches.map(item => `
-        <div class="search-item user-select-none p-2" onclick="handleSuggestionClick('${item.link}')">
-            ${item.text}
-        </div>
-    `).join("");
-    const top_offset = e.target.clientTop + e.target.clientHeight;
-    const left_offset = e.target.clientLeft;
-    sugg_hook.style.top = `calc(${top_offset}px + 0.5rem)`;
-    sugg_hook.style.right = `calc(${left_offset}px + 0.5rem)`;
-    sugg_hook.style["min-width"] = `${e.target.clientWidth}px`;
-})
+        };
+        checkReady();
+    })
+}
 
 async function fetchArticles() {
-    articles = await fetch("./articles.json", {cache: "no-store"}).then(x => x.json());
-    sugg_articles = await fetch("./home_articles.json", {cache: "no-store"}).then(x => x.json());
+    const article_md = "https://raw.githubusercontent.com/wiki/2dos/DK64-Randomizer/Wiki-Site-Tree.md"
+    const article_data = await fetch(article_md, {cache: "no-store"}).then(x => x.text());
+    articles = [
+        {
+            "name": "Wiki Editing",
+            "link": "WikiEditing"
+        },
+        {
+            "name": "Custom Locations: Coins",
+            "link": "CustomLocationsCoins"
+        },
+        {
+            "name": "Custom Locations: Colored Bananas",
+            "link": "CustomLocationsColoredBananas"
+        },
+        {
+            "name": "Custom Locations: Doors",
+            "link": "CustomLocationsDoors"
+        },
+        {
+            "name": "Custom Locations: Fairies",
+            "link": "CustomLocationsFairies"
+        },
+        {
+            "name": "Custom Locations: Kasplats",
+            "link": "CustomLocationsKasplats"
+        },
+        {
+            "name": "Custom Locations: Miscellaneous",
+            "link": "CustomLocationsMiscellaneous"
+        },
+        {
+            "name": "Plando Colors",
+            "link": "PlandoColors"
+        },
+        {
+            "name": "Random Settings: Difficult",
+            "link": "RandomSettingsDifficult"
+        },
+        {
+            "name": "Random Settings: Difficult With Qol Shuffle",
+            "link": "RandomSettingsDifficultWithQolShuffle"
+        },
+        {
+            "name": "Random Settings: Easy",
+            "link": "RandomSettingsEasy"
+        },
+        {
+            "name": "Random Settings: Standard",
+            "link": "RandomSettingsStandard"
+        }
+    ];
+    sugg_articles = [];
+    let state = 0; // 0 = not in article list, 1 = article list, 2 = sugg list
+    article_data.split("\n").forEach(line => {
+        if (line == "## Article List") {
+            state = 1;
+            return;
+        } else if (line == "## New? Start Here section") {
+            articles_ready = true;
+            state = 2;
+            return;
+        }
+        if (state == 1) {
+            if (line.substring(0, 2) == "- ") {
+                const txt = line.substring(2);
+                articles.push({
+                    "name": txt,
+                    "link": txt.replaceAll(" ",""),
+                    "github": txt.replaceAll(" ","-"),
+                })
+            }
+        } else if (state == 2) {
+            if (line.length > 0) {
+                const is_sub = line.substring(0, 2) == "- ";
+                if (is_sub) {
+                    sugg_articles[sugg_articles.length - 1].articles.push(line.substring(2).replaceAll(" ",""));
+                } else {
+                    sugg_articles.push({
+                        "head": line,
+                        "articles": [],
+                    })
+                }
+            }
+        }
+    })
+    // Populate search suggestions
+    article_names = articles.map(item => {
+        return {
+            "name": item.name,
+            "link": getLink(item),
+        };
+    });
+    articles_ready = true;
     // Populate Suggested Article Text
     const sugg_article_holders = document.getElementsByClassName("sugg-articles");
     if (sugg_article_holders.length == 0) {
@@ -100,11 +181,24 @@ async function fetchArticles() {
     for (let s = 0; s < sugg_article_holders.length; s++) {
         sugg_article_holders[s].innerHTML = sugg_article_html.join("")
     }
+    const article_list = document.getElementById("article-list");
+    if (article_list) {
+        const sorted_articles = articles.sort((a, b) => a.name > b.name ? 1 : ((b.name > a.name) ? -1 : 0));
+        article_list.innerHTML = sorted_articles.map(article => {
+            if (article.name.includes("Custom Locations: ")) {
+                return "";
+            }
+            if (article.name.includes("Random Settings: ")) {
+                return "";
+            }
+            return `<li><a href="${getLink(article)}">${article.name}</a></li>`;
+        }).join("");
+    }
 }
 
 fetchArticles();
 
-const invalid_id_characters = [" ", ",", "(", ")", ".", "\"", "'"]
+const invalid_id_characters = [" ", ",", "\"", "'"]
 let used_ids = {};
 
 class MarkdownNavItem {
@@ -116,9 +210,7 @@ class MarkdownNavItem {
         split_id.forEach((char, char_index) => {
             let new_char = char;
             if (invalid_id_characters.includes(char)) {
-                if (char_index < (split_id.length - 1)) {
-                    new_char = "-";
-                }
+                new_char = "-";
             }
             new_split_id.push(new_char);
         })
@@ -351,6 +443,7 @@ function filterHTML(element, output_html) {
     })
     element.innerHTML = output_html;
     element.removeAttribute("ref");
+    document.getElementById("content-pane").removeAttribute("hidden");
     // Content Filtration
     const content_hook = document.getElementById("markdown_content");
     // Add classes to code blocks where their parent element isn't a pre-tag
@@ -374,9 +467,39 @@ function filterHTML(element, output_html) {
     const img_buttons = content_hook.getElementsByTagName("imgbtn");
     while (img_buttons.length > 0) {
         const btn_img = img_buttons[0].getAttribute("img");
-        const btn_href = img_buttons[0].getAttribute("href");
+        let btn_href = img_buttons[0].getAttribute("href");
         const btn_text = img_buttons[0].getAttribute("text");
+        if (btn_href.substring(0, 2) == "./") {
+            btn_href = `index.html?title=${btn_href.substring(2)}`
+        }
         img_buttons[0].outerHTML = `<div class="img-btn-container p-3 m-2 user-select-none" onclick="goTo('${btn_href}')"><img src=${btn_img} /><div class="img-btn-text">${btn_text}</div></div>`
+    }
+    // Image Info
+    const image_info = content_hook.getElementsByTagName("imginfo");
+    while (image_info.length > 0) {
+        const info_img = image_info[0].getAttribute("img");
+        const has_text = image_info[0].hasAttribute("text");
+        const info_text = image_info[0].getAttribute("text");
+        const has_header = image_info[0].hasAttribute("header");
+        const info_header = image_info[0].getAttribute("header");
+        const has_subtitle = image_info[0].hasAttribute("subtitle");
+        const info_subtitle = image_info[0].getAttribute("subtitle");
+        image_info[0].outerHTML = `
+            <div class="card mx-2" style="width: 18rem;">
+                <img src=${info_img} class="card-img-top" alt="${info_text}" />
+                <div class="card-body">
+                    ${has_header ? `
+                        <h5 class="card-title">${info_header}</h5>
+                    ` : ""}
+                    ${has_subtitle ? `
+                        <h6 class="card-subtitle mb-2 text-body-secondary">${info_subtitle}</h6>
+                    ` : ""}
+                    ${has_text ? `
+                        <p class="card-text">${info_text}</p>
+                    ` : ""}
+                    </p>
+                </div>
+            </div>`
     }
     // Font-Awesome icons <fa-icon>cls</fa-icon>
     const fa_icons = content_hook.getElementsByTagName("fa-icon");
@@ -391,12 +514,66 @@ function filterHTML(element, output_html) {
         flex_items[0].outerHTML = `<div style="display:flex">${contents}</div>`
     }
 
+    // BS Alerts
+    const alert_types = {
+        "primary": "fa-solid fa-circle-info",
+        "secondary": "fa-solid fa-circle-info",
+        "success": "fa-solid fa-circle-check",
+        "danger": "fa-solid fa-triangle-exclamation",
+        "warning": "fa-solid fa-triangle-exclamation",
+        "info": "fa-solid fa-circle-info",
+        "light": "",
+        "dark": "",
+    };
+    Object.keys(alert_types).forEach(al_type => {
+        const info_items = content_hook.getElementsByTagName(`alert${al_type}`);
+        while (info_items.length > 0) {
+            const contents = info_items[0].innerHTML;
+            info_items[0].outerHTML = `
+                <div class="alert alert-${al_type}" role="alert">
+                    <i class="${alert_types[al_type]}"></i>
+                    ${contents}
+                </div>`
+        }
+    })
+
     // Warp to ID if specified
     hash = window.location.hash;
     if (hash.length > 0) {
-        const hash_hook = document.querySelector(hash);
+        let hash_hook = null;
+        if (hash.substring(0, 1) == "#") {
+            hash_hook = document.getElementById(hash.substring(1))
+        } else {
+            hash_hook = document.querySelector(hash);
+        }
         if (hash_hook) {
             hash_hook.scrollIntoView();
+        }
+    }
+
+    const imgs = document.getElementsByTagName("img");
+    for (let i = 0; i < imgs.length; i++) {
+        if (imgs[i].parentElement.classList.contains("img-btn-container")) {
+            continue;
+        }
+        imgs[i].addEventListener("click", (e) => {
+            const alt_text = e.target.getAttribute("alt");
+            updateImage(e.target.getAttribute("src"), alt_text == "image" ? "" : alt_text);
+        });
+    }
+
+    // Modify links
+    const container = document.getElementById("content-container");
+    if (container) {
+        const links = container.getElementsByTagName("a");
+        for (let i = 0; i < links.length; i++) {
+            href = links[i].getAttribute("href");
+            if (href) {
+                if (href.substring(0, 2) == "./") {
+                    console.log("Modifying link...");
+                    links[i].setAttribute("href", `?title=${href.substring(2)}`)
+                }
+            }
         }
     }
 }

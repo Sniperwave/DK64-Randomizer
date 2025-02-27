@@ -42,12 +42,24 @@ This will be converted to the following:
 ## Button Images
 To include a clickable button which has a header image, you will need to add the following piece of code to your markdown file:
 ```
-<imgbtn img="../static/img/logo.png" href="./WikiEditing.html#buttonimages" text="Insert Text"></imgbtn>
+<imgbtn img="../static/img/logo.webp" href="./WikiEditing.html#buttonimages" text="Insert Text"></imgbtn>
 ```
 
 This will be converted to the following:
 
-<imgbtn img="../static/img/logo.png" href="./WikiEditing.html#buttonimages" text="Insert Text"></imgbtn>
+<imgbtn img="../static/img/logo.webp" href="./WikiEditing.html#buttonimages" text="Insert Text"></imgbtn>
+
+## Image Panel
+To include a panel which has a header image followed by some text, you will need to add the following piece of code to your markdown file:
+```
+<imginfo img="../static/img/logo.webp" header="Mornin" subtitle="Here is a subtitle" text="Insert Text"></imginfo>
+```
+
+This will be converted to the following:
+
+<imginfo img="../static/img/logo.webp" header="Mornin" subtitle="Here is a subtitle" text="Insert Text"></imginfo>
+
+The "header", "subtitle" and "text" attributes are optional, but it's recommended that you have at least 1 of them
 
 ## Flex
 To include a flex container, insert the following piece of code to your markdown file:
@@ -65,3 +77,16 @@ To include a font-awesome icon (v6.4.2), insert the following piece of code to y
 This will be converted to the following:
 
 <fa-icon>fa-solid fa-code</fa-icon>
+
+## Bootstrap Alerts
+
+To include a standardized boostrap alert, insert the following piece of code into your markdown file:
+```
+<alertdanger>Test</alertdanger>
+```
+
+This will be converted to the following:
+
+<alertdanger>Test</alertdanger>
+
+This works for all bootstrap color definitions

@@ -10,8 +10,8 @@
  */
 #include "../../include/common.h"
 
-#define STRING_MAX_SIZE 128
-#define ELLIPSIS_CUTOFF 123
+#define STRING_MAX_SIZE 256
+#define ELLIPSIS_CUTOFF 125
 #define GAME_HINT_COUNT 35
 #define HINT_SOLVED_OPACITY 0x80
 
@@ -25,6 +25,7 @@ typedef enum itemloc_subgroups {
     ITEMLOC_BFITRAINING,
     ITEMLOC_INSUPG,
     ITEMLOC_KONGS,
+    ITEMLOC_SHOPKEEPERS,
     ITEMLOC_EARLYKEYS,
     ITEMLOC_LATEKEYS,
     ITEMLOC_TERMINATOR,
@@ -42,18 +43,11 @@ static char string_copy[STRING_MAX_SIZE] = "";
 static char mtx_counter = 0;
 static char* unk_string = "???";
 static short hint_clear_flags[35] = {};
+static short hint_item_regions[35] = {};
 static char hint_level = 0;
 static char item_subgroup = 0;
-static char level_hint_text[0x18] = "";
-static char item_loc_text[0x18] = "";
-
-static char* unknown_hints[] = {
-    "??? - 000 GOLDEN BANANAS",
-    "??? - 001 GOLDEN BANANAS",
-    "??? - 002 GOLDEN BANANAS",
-    "??? - 003 GOLDEN BANANAS",
-    "??? - 004 GOLDEN BANANAS",
-};
+static char level_hint_text[0x40] = "";
+static char item_loc_text[0x40] = "";
 
 static itemloc_data itemloc_textnames[] = {
     {
@@ -82,15 +76,15 @@ static itemloc_data itemloc_textnames[] = {
         .lengths={1, 1, 1, 1, 1, -1}
     }, // 5
     {
-        .header="GUN UPGRADES", 
-        .flags={0xD202, 0xD203, FLAG_ITEM_BELT_0, 0, 0, 0}, 
-        .lengths={1, 1, 2, -1, -1, -1}
-    }, // 4
+        .header="GUN UPGRADES AND FAIRY MOVES", 
+        .flags={0xD202, 0xD203, FLAG_ITEM_BELT_0, FLAG_ABILITY_CAMERA, FLAG_ABILITY_SHOCKWAVE, 0}, 
+        .lengths={1, 1, 2, 1, 1, -1}
+    }, // 6
     {
         .header="BASIC MOVES", 
-        .flags={FLAG_TBARREL_DIVE, FLAG_TBARREL_ORANGE, FLAG_TBARREL_BARREL, FLAG_TBARREL_VINE, FLAG_ABILITY_CAMERA, FLAG_ABILITY_SHOCKWAVE}, 
-        .lengths={1, 1, 1, 1, 1, 1}
-    }, // 6
+        .flags={FLAG_TBARREL_DIVE, FLAG_TBARREL_ORANGE, FLAG_TBARREL_BARREL, FLAG_TBARREL_VINE, FLAG_ABILITY_CLIMBING, 0}, 
+        .lengths={1, 1, 1, 1, 1, -1}
+    }, // 5
     {
         .header="INSTRUMENT UPGRADES AND SLAMS", 
         .flags={FLAG_ITEM_INS_0, FLAG_ITEM_SLAM_0, 0, 0, 0, 0}, 
@@ -102,6 +96,11 @@ static itemloc_data itemloc_textnames[] = {
         .lengths={1, 1, 1, 1, 1, -1}
     }, // 5
     {
+        .header="SHOPKEEPERS", 
+        .flags={FLAG_ITEM_CRANKY, FLAG_ITEM_CANDY, FLAG_ITEM_FUNKY, FLAG_ITEM_SNIDE, 0, 0}, 
+        .lengths={1, 1, 1, 1, -1, -1}
+    }, // 4
+    {
         .header="EARLY KEYS", 
         .flags={FLAG_KEYHAVE_KEY1, FLAG_KEYHAVE_KEY2, FLAG_KEYHAVE_KEY3, FLAG_KEYHAVE_KEY4, 0, 0}, 
         .lengths={1, 1, 1, 1, -1, -1}
@@ -112,6 +111,47 @@ static itemloc_data itemloc_textnames[] = {
         .lengths={1, 1, 1, 1, -1, -1}
     }, // 5
 };
+
+static unsigned char progressive_ding_timer = 0;
+
+void initProgressiveTimer(void) {
+    progressive_ding_timer = 52;
+}
+
+Gfx* renderProgressiveSprite(Gfx* dl) {
+    return renderIndicatorSprite(dl, 108, 0, &progressive_ding_timer, 48, 48, IA8);
+}
+
+void playProgressiveDing(void) {
+    initProgressiveTimer();
+    playSFX(0x2EA);
+}
+
+static int old_progressive_level = -1;
+
+void handleProgressiveIndicator(int allow_ding) {
+    if (Rando.progressive_hint_gb_cap == 0) {
+        return;
+    }
+    int item_count = getItemCountReq(Rando.prog_hint_item);
+    int new_progressive_level = -1;
+    for (int i = 0; i < GAME_HINT_COUNT; i++) {
+        if (item_count >= getHintRequirement(i)) {
+            new_progressive_level = i;
+        }
+    }
+    if ((CurrentMap != MAP_MAINMENU) && (allow_ding)) {
+        if (new_progressive_level > old_progressive_level) {
+            playProgressiveDing();
+        }
+    }
+    old_progressive_level = new_progressive_level;
+}
+
+void resetProgressive(void) {
+    old_progressive_level = -1;
+    handleProgressiveIndicator(0);
+}
 
 void initHints(void) {
     if (!hints_initialized) {
@@ -136,7 +176,7 @@ void wipeHintCache(void) {
     hints_initialized = 0;
 }
 
-int* drawHintText(int* dl, char* str, int x, int y, int opacity, int center) {
+Gfx* drawHintText(Gfx* dl, char* str, int x, int y, int opacity, int center, int enable_recolor) {
     mtx_item mtx0;
     mtx_item mtx1;
     _guScaleF(&mtx0, 0x3F19999A, 0x3F19999A, 0x3F800000);
@@ -144,80 +184,128 @@ int* drawHintText(int* dl, char* str, int x, int y, int opacity, int center) {
     float hint_x = x;
     if (center) {
         hint_x = 640.0f;
-        if (Rando.true_widescreen) {
-            hint_x = SCREEN_WD_FLOAT * 2;
-        }
     }
     _guTranslateF(&mtx1, hint_x, position, 0.0f);
     _guMtxCatF(&mtx0, &mtx1, &mtx0);
     _guTranslateF(&mtx1, 0.0f, 48.0f, 0.0f);
     _guMtxCatF(&mtx0, &mtx1, &mtx0);
     _guMtxF2L(&mtx0, &static_mtx[(int)mtx_counter]);
-
-    *(unsigned int*)(dl++) = 0xDE000000;
-	*(unsigned int*)(dl++) = 0x01000118;
-	*(unsigned int*)(dl++) = 0xDA380002;
-	*(unsigned int*)(dl++) = 0x02000180;
-	*(unsigned int*)(dl++) = 0xE7000000;
-	*(unsigned int*)(dl++) = 0x00000000;
-	*(unsigned int*)(dl++) = 0xFCFF97FF;
-	*(unsigned int*)(dl++) = 0xFF2CFE7F;
-	*(unsigned int*)(dl++) = 0xFA000000;
-    *(unsigned int*)(dl++) = 0xFFFFFF00 | opacity;
-    *(unsigned int*)(dl++) = 0xDA380002;
-    *(unsigned int*)(dl++) = (int)&static_mtx[(int)mtx_counter];
+    gSPDisplayList(dl++, 0x01000118);
+    gSPMatrix(dl++, 0x02000180, G_MTX_PUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+    gDPPipeSync(dl++);
+    gDPSetCombineMode(dl++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
+    gDPSetPrimColor(dl++, 0, 0, (base_text_color >> 24) & 0xFF, (base_text_color >> 16) & 0xFF, (base_text_color >> 8) & 0xFF, opacity);
+    gSPMatrix(dl++, (int)&static_mtx[(int)mtx_counter], G_MTX_PUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
     int data = 0x80;
     if (!center) {
         data = 0;
     }
-    dl = displayText((int*)dl,6,0,0,str,data);
+    if (Rando.pause_hints_colored == 0) {
+        enable_recolor = 0;
+    }
+    if (enable_recolor) {
+        setCharacterRecoloring(1, str);
+        data |= 0x12;
+    }
+    dl = displayText(dl,6,0,0,str,data);
+    setCharacterRecoloring(0, (char*)0);
     mtx_counter += 1;
-    *(unsigned int*)(dl++) = 0xD8380002;
-    *(unsigned int*)(dl++) = 0x00000040;
+    gSPPopMatrix(dl++, G_MTX_MODELVIEW);
     return dl;
 }
 
-int* drawSplitString(int* dl, char* str, int x, int y, int y_sep, int opacity) {
+#define SPLIT_STRING_LINE_LIMIT 50
+  
+Gfx* drawSplitString(Gfx* dl, char* str, int x, int y, int y_sep, int opacity) {
     int curr_y = y;
     int string_length = cstring_strlen(str);
     int trigger_ellipsis = 0;
-    if ((unsigned int)(string_length) > ELLIPSIS_CUTOFF) {
-        string_length = ELLIPSIS_CUTOFF;
-        trigger_ellipsis = 1;
+    if ((unsigned int)(string_length) > STRING_MAX_SIZE) {
+        string_length = STRING_MAX_SIZE;
     }
     int string_copy_ref = (int)string_copy;
     wipeMemory(string_copy, STRING_MAX_SIZE);
     dk_memcpy(string_copy, str, string_length);
-    if (trigger_ellipsis) {
-        string_copy[ELLIPSIS_CUTOFF] = 0x2E;
-        string_copy[ELLIPSIS_CUTOFF + 1] = 0x2E;
-        string_copy[ELLIPSIS_CUTOFF + 2] = 0x2E;
-    }
-    string_copy[126] = 0;
-    string_copy[127] = 0;
+    string_copy[STRING_MAX_SIZE - 2] = 0;
+    string_copy[STRING_MAX_SIZE - 1] = 0;
     int header = 0;
+    int letter_count = 0;
     int last_safe = 0;
     int line_count = 0;
+    int color_index = 0;
+    int force_split = 0;
     while (1) {
         char referenced_character = *(char*)(string_copy_ref + header);
         int is_control = 0;
         if (referenced_character == 0) {
             // Terminator
-            return drawHintText(dl, (char*)(string_copy_ref), x, curr_y, opacity, 1);
+            return drawHintText(dl, (char*)(string_copy_ref), x, curr_y, opacity, 1, 1);
         } else if (referenced_character == 0x20) {
             // Space
             last_safe = header;
+            int seg_addition = 1;
+            while (1) {
+                char ref_seg_character = *(char*)(string_copy_ref + header + seg_addition);
+                if ((ref_seg_character == 0) || (ref_seg_character == 0x20)) {
+                    break;
+                } else {
+                    seg_addition++;
+                }
+            }
+            if ((header + seg_addition) > SPLIT_STRING_LINE_LIMIT) {
+                force_split = 1;
+            }
         } else if ((referenced_character > 0) && (referenced_character <= 0x10)) {
             // Control byte character
+            if ((referenced_character >= 4) && (referenced_character <= 0xD)) {
+                int temp_color = referenced_character - 3;
+                if (temp_color == color_index) {
+                    color_index = 0;
+                } else {
+                    color_index = temp_color;
+                }
+            }
             is_control = 1;
             int end = (int)(string_copy) + (STRING_MAX_SIZE - 1);
             int size = end - (string_copy_ref + header + 1);
             dk_memcpy((void*)(string_copy_ref + header), (void*)(string_copy_ref + header + 1), size);
+        } else {
+            // Actual letter or punctuation
+            letter_count += 1;
+            if(letter_count >= ELLIPSIS_CUTOFF){
+                *(char*)(referenced_character) = 0;
+                if(header > 2){
+                    // It should be impossible to hit 125 characters without being more than 2 characters into the third line
+                    // Insert ellipsis 
+                    *(char*)(string_copy_ref + header - 1) = 0x2E;
+                    *(char*)(string_copy_ref + header - 2) = 0x2E;
+                    *(char*)(string_copy_ref + header - 3) = 0x2E;
+                }
+                // It's also now a terminator, so:
+                return drawHintText(dl, (char*)(string_copy_ref), x, curr_y, opacity, 1, 1);
+            }
         }
+        setCharacterColor(header, color_index, opacity);
         if (!is_control) {
-            if (header > 50) {
+            if ((header > SPLIT_STRING_LINE_LIMIT) || (force_split)) {
                 *(char*)(string_copy_ref + last_safe) = 0; // Stick terminator in last safe
-                dl = drawHintText(dl, (char*)(string_copy_ref), x, curr_y, opacity, 1);
+                if(line_count == 2 && header > SPLIT_STRING_LINE_LIMIT){
+                    // When reaching the 51st character of the 3rd line, add ellipsis depending on last safe position
+                    if((last_safe + 3) < SPLIT_STRING_LINE_LIMIT){
+                        // Insert ellipsis 
+                        *(char*)(string_copy_ref + last_safe) = 0x2E;
+                        *(char*)(string_copy_ref + last_safe + 1) = 0x2E;
+                        *(char*)(string_copy_ref + last_safe + 2) = 0x2E;
+                        *(char*)(string_copy_ref + last_safe + 3) = 0;
+                    } else {
+                        // Insert ellipsis 
+                        *(char*)(string_copy_ref + header - 1) = 0x2E;
+                        *(char*)(string_copy_ref + header - 2) = 0x2E;
+                        *(char*)(string_copy_ref + header - 3) = 0x2E;
+                    }
+                    
+                }
+                dl = drawHintText(dl, (char*)(string_copy_ref), x, curr_y, opacity, 1, 1);
                 line_count += 1;
                 if (line_count == 3) {
                     return dl;
@@ -226,6 +314,7 @@ int* drawSplitString(int* dl, char* str, int x, int y, int y_sep, int opacity) {
                 string_copy_ref += (last_safe + 1);
                 header = 0;
                 last_safe = 0;
+                force_split = 0;
             } else {
                 header += 1;
             }
@@ -234,68 +323,56 @@ int* drawSplitString(int* dl, char* str, int x, int y, int y_sep, int opacity) {
     return dl;
 }
 
-int getHintGBRequirement(int level, int kong) {
+static unsigned char hints_per_screen = 5;
+static unsigned char hint_screen_count = 7;
+static unsigned char hint_offset = 140;
+
+int getHintRequirement(int slot) {
     int cap = Rando.progressive_hint_gb_cap;
-    int slot = (5 * level) + kong;
+    int batch_index = 9;
     if (slot < 34) {
-        /*
-            Little bit of chunking to reduce amount of times checking the pause menu
-            You'll get:
-                1  2  3  4  - Price of hint 1
-                5  6  7  8  - Price of hint 5
-                9  10 11 12 - Price of hint 9
-                13 14 15 16 - Price of hint 13
-                17 18 19 20 - Price of hint 17
-                21 22 23 24 - Price of hint 21
-                25 26 27 28 - Price of hint 25
-                29 30 31 32 - Price of hint 29
-                33 34       - Price of hint 33
-                35          - Price of hint 35
-        */
-        slot &= 0xFC;
+        batch_index = slot >> 2;
     }
-    float req = 1;
-    req /= GAME_HINT_COUNT;
-    req *= (slot + 1);
-    req += 3.0f;
-    req *= 1.570796f; // 0.5pi
-    req = dk_sin(req) * cap;
-    req += cap;
-    int req_i = req;
-    if (req_i <= 0) {
-        req_i = 1; // Ensure no hints are free
-    } else if (slot == (GAME_HINT_COUNT - 1)) {
-        req_i = cap; // Ensure last hint is always at cap
-    }
-    return req_i;
+    return Rando.progressive_bounds[batch_index];
 }
 
-int getPluralCharacter(int amount) {
-    if (amount != 1) {
-        return 0x53; // "S"
+void displayCBCount(pause_paad *handler, void* sprite, int x, int y, float scale, int unk0, int unk1) {
+    displaySprite(handler, sprite, x, y, scale, unk0, unk1);
+    if (handler->screen == PAUSESCREEN_HINTS) {
+        int cb_count = getItemCountReq(REQITEM_COLOREDBANANA);
+        displayPauseSpriteNumber(handler, 0x24, 0x1C, 0xC, -10, cb_count, 1, 0);
+        displaySprite(handler, (void*)0x80721474, 0x24, 0x1C, 0.75f, 2, 1);
     }
-    return 0;
 }
 
-int showHint(int level, int kong) {
-    int slot = (5 * level) + kong;
+regions getHintItemRegion(int slot) {
+    return hint_item_regions[slot];
+}
+
+int showHint(int slot) {
     if (Rando.progressive_hint_gb_cap > 0) {
-        int req = getHintGBRequirement(level, kong);
-        int gb_count = getTotalGBs();
+        int req = getHintRequirement(slot);
+        int gb_count = getItemCountReq(Rando.prog_hint_item);
         return gb_count >= req;
     }
     // Not progressive hints
-    return checkFlag(FLAG_WRINKLYVIEWED + slot, FLAGTYPE_PERMANENT);
+    return checkFlagDuplicate(FLAG_WRINKLYVIEWED + slot, FLAGTYPE_PERMANENT);
 }
 
-int* displayBubble(int* dl) {
-    *(unsigned int*)(dl++) = 0xFA000000;
-    *(unsigned int*)(dl++) = 0xFFFFFF96;
+Gfx* displayBubble(Gfx* dl) {
+    int opacity = 0xFF;
     int bubble_x = 625;
-    if (Rando.true_widescreen) {
-        bubble_x = (2 * SCREEN_WD) - 15;
+    int y = 480;
+    float x_scale = 26.0f;
+    float y_scale = 21.5f;
+    if (Rando.dark_mode_textboxes) {
+        opacity = 0x96;
+        y = 465;
+        x_scale = 24.0f;
+        y_scale = 20.0f;
     }
-    return displayImage(dl, 107, 0, RGBA16, 48, 32, bubble_x, 465, 24.0f, 20.0f, 0, 0.0f);
+    gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, opacity);
+    return displayImage(dl, 107, 0, RGBA16, 48, 32, bubble_x, y, x_scale, y_scale, 0, 0.0f);
 }
 
 int getTiedShopmoveFlag(int flag) {
@@ -341,60 +418,114 @@ void getItemSpecificity(char** str, int step, int flag) {
 
 void initHintFlags(void) {
     unsigned short* hint_clear_write = getFile(GAME_HINT_COUNT << 1, 0x1FFE000);
+    unsigned short* hint_reg_write = getFile(GAME_HINT_COUNT << 1, 0x1FFE080);
+    if (Rando.progressive_hint_gb_cap > 0) {
+        hints_per_screen = 4;
+        hint_screen_count = 9;
+        hint_offset = 170;
+    }
     for (int i = 0; i < GAME_HINT_COUNT; i++) {
         hint_clear_flags[i] = hint_clear_write[i];
+        hint_item_regions[i] = hint_reg_write[i];
     }
 }
 
-int* drawHintScreen(int* dl, int level_x) {
+const char* item_names[] = {
+    "NOTHING",
+    "KONG",
+    "MOVE",
+    "GOLDEN BANANA",
+    "BLUEPRINT",
+    "FAIRY",
+    "KEY",
+    "CROWN",
+    "COMPANY COIN",
+    "MEDAL",
+    "BEAN",
+    "PEARL",
+    "RAINBOW COIN",
+    "ICE TRAP",
+    "%",
+    "COLORED BANANA",
+};
+char item_name_plural[] = "COLORED BANANAS";
+
+char* getItemName(int item_index, int item_count) {
+    if ((item_count == 1) || (item_index == 14)) {
+        // Item index 14 is game percentage, avoid pluralizing
+        return item_names[item_index];
+    }
+    if (item_index == 5) {
+        // We love grammar
+        return "FAIRIES";
+    }
+    dk_strFormat(&item_name_plural, "%s%c", item_names[item_index], 'S');
+    return &item_name_plural;
+}
+
+Gfx* drawHintScreen(Gfx* dl, int level_x) {
     display_billboard_fix = 1;
     dl = printText(dl, level_x, 0x3C, 0.65f, "HINTS");
     // Handle Controls
-    handleCShifting(&hint_level, 7);
+    handleCShifting(&hint_level, hint_screen_count);
     // Display level
-    dk_strFormat((char*)level_hint_text, "w %s e", levels[(int)hint_level + 1]);
+    if (Rando.progressive_hint_gb_cap > 0) {
+        if (hint_level == 8) {
+            dk_strFormat((char*)level_hint_text, "w BATCHES 9 AND 10 e");
+        } else {
+            dk_strFormat((char*)level_hint_text, "w BATCH %d e", hint_level + 1);
+        }
+    } else {
+        dk_strFormat((char*)level_hint_text, "w %s e", levels[(int)hint_level + 1]);
+    }
     dl = printText(dl, level_x, 120, 0.5f, level_hint_text);
     // Display Hints
     dl = displayBubble(dl);
     mtx_counter = 0;
-    for (int i = 0; i < 5; i++) {
-        if (showHint(hint_level, i)) {
+    for (int i = 0; i < hints_per_screen; i++) {
+        int hint_local_index = (hints_per_screen * hint_level) + i;
+        if (hint_local_index > 34) {
+            return dl;
+        }
+        if (showHint(hint_local_index)) {
             int opacity = 0xFF;
-            int assoc_flag = hint_clear_flags[(5 * hint_level) + i];
+            int assoc_flag = hint_clear_flags[hint_local_index];
             if (assoc_flag != -1) {
                 if (hasMove(assoc_flag)) {
                     opacity = HINT_SOLVED_OPACITY;
                 }
             }
-            dl = drawSplitString(dl, (char*)hint_pointers[(5 * hint_level) + i], level_x, 140 + (120 * i), 40, opacity);
+            dl = drawSplitString(dl, (char*)hint_pointers[hint_local_index], level_x, hint_offset + (120 * i), 40, opacity);
         } else {
             if (Rando.progressive_hint_gb_cap == 0) {
-                unknown_hints[i] = "???";
+                regions tied_region = getHintItemRegion(hint_local_index);
+                if (tied_region == REGION_NULLREGION) {
+                    unknown_hints[i] = "???";
+                } else {
+                    dk_strFormat(unknown_hints[i], "??? - %s", hint_region_names[tied_region]);
+                }
             } else {
-                int requirement = getHintGBRequirement(hint_level, i);
-                dk_strFormat(unknown_hints[i], "??? - %d GOLDEN BANANA%c", requirement, getPluralCharacter(requirement));
+                int requirement = getHintRequirement(hint_local_index);
+                dk_strFormat(unknown_hints[i], "??? - %d %s", requirement, getItemName(Rando.prog_hint_item, requirement));
             }
-            dl = drawSplitString(dl, unknown_hints[i], level_x, 140 + (120 * i), 40, 0xFF);
+            dl = drawSplitString(dl, unknown_hints[i], level_x, hint_offset + (120 * i), 40, 0xFF);
         }
         
     }
     return dl;
 }
 
-int* drawItemLocationScreen(int* dl, int level_x) {
+Gfx* drawItemLocationScreen(Gfx* dl, int level_x) {
     display_billboard_fix = 1;
     dl = printText(dl, level_x, 0x3C, 0.65f, "ITEM LOCATIONS");
     // Handle Controls
     handleCShifting(&item_subgroup, ITEMLOC_TERMINATOR);
     // Display subgroup
-    dk_strFormat((char*)item_loc_text, "w %s e", itemloc_textnames[(int)item_subgroup].header);
-    dl = printText(dl, level_x, 120, 0.5f, item_loc_text);
+    dk_strFormat(&item_loc_text[0], "w %s e", itemloc_textnames[(int)item_subgroup].header);
+    dl = printText(dl, level_x, 120, 0.5f, &item_loc_text[0]);
     // Display Hints
     dl = displayBubble(dl);
     int item_loc_x = 200;
-    if (Rando.true_widescreen) {
-        item_loc_x = SCREEN_WD - 120;
-    }
     mtx_counter = 0;
     int head = 0;
     int k = 0;
@@ -412,7 +543,7 @@ int* drawItemLocationScreen(int* dl, int level_x) {
         if (size == -1) {
             break;
         }
-        dl = drawHintText(dl, itemloc_pointers[head], item_loc_x, y, 0xFF, 0);
+        dl = drawHintText(dl, itemloc_pointers[head], item_loc_x, y, 0xFF, 0, 0);
         for (int j = 0; j < size; j++) {
             y += 40;
             char* str = itemloc_pointers[head + 1 + j];
@@ -426,7 +557,7 @@ int* drawItemLocationScreen(int* dl, int level_x) {
                 }
             }
             
-            dl = drawHintText(dl, str, item_loc_x, y, 0xC0, 0);
+            dl = drawHintText(dl, str, item_loc_x, y, 0xC0, 0, 0);
         }
         head += 1 + size;
         y += 60;
